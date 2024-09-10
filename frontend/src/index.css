@@ -9,9 +9,7 @@
     height: 100vh;
     font-size: 1.5rem;
     color: #fff;
-    background-color: #000000; /* or any background color you prefer */
+    background-color: #000000; 
 }
-.list {
-    border: 1px solid red; /* Just for debugging */
-  }
+
   

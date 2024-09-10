@@ -1,25 +1,133 @@
 const pool = require('../config/db');
 
-exports.getBoards = async (req, res) => {
+// Fetch all boards
+exports.getAllBoards = async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM boards');
+        const result = await pool.query('SELECT * FROM boards ORDER BY id');
         res.json(result.rows);
     } catch (err) {
-        console.error(err);
+        console.error('Error fetching boards:', err.message);
         res.status(500).json({ error: 'Internal server error' });
     }
 };
 
+// Create a new board
 exports.createBoard = async (req, res) => {
-    const { name, description } = req.body;
+    const { name, color } = req.body;
+
+    if (!name || !color) {
+        return res.status(400).json({ error: 'Name and color are required' });
+    }
+
     try {
         const result = await pool.query(
-            'INSERT INTO boards (name, description) VALUES ($1, $2) RETURNING *',
-            [name, description]
+            'INSERT INTO boards (name, color) VALUES ($1, $2) RETURNING *',
+            [name, color]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
-        console.error(err);
+        console.error('Error creating board:', err.message);
         res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+// Fetch lists for a specific board
+exports.getListsByBoardId = async (req, res) => {
+    const { boardId } = req.params;
+
+    try {
+        const result = await pool.query('SELECT * FROM lists WHERE board_id = $1 ORDER BY position', [boardId]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error fetching lists:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+// Create a new list for a board
+exports.createListForBoard = async (req, res) => {
+    const { boardId } = req.params;
+    const { name } = req.body;
+
+    if (!name) {
+        return res.status(400).json({ error: 'List name is required' });
+    }
+
+    try {
+        const positionResult = await pool.query('SELECT COALESCE(MAX(position), 0) + 1 AS new_position FROM lists WHERE board_id = $1', [boardId]);
+        const newPosition = positionResult.rows[0].new_position;
+
+        const result = await pool.query(
+            'INSERT INTO lists (name, board_id, position) VALUES ($1, $2, $3) RETURNING *',
+            [name, boardId, newPosition]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error('Error creating list:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+// Delete a board
+exports.deleteBoard = async (req, res) => {
+    const { boardId } = req.params;
+
+    try {
+        await pool.query('DELETE FROM boards WHERE id = $1', [boardId]);
+        res.status(200).json({ message: 'Board deleted successfully' });
+    } catch (err) {
+        console.error('Error deleting board:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+// Rename a board
+exports.renameBoard = async (req, res) => {
+    const { id } = req.params;
+    const { name } = req.body;
+
+    try {
+        const result = await pool.query(
+            'UPDATE boards SET name = $1 WHERE id = $2 RETURNING *',
+            [name, id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'Board not found' });
+        }
+
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Error renaming board:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+// Reorder lists for a board
+exports.reorderLists = async (req, res) => {
+    const { boardId } = req.params;
+    const { lists } = req.body;
+
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        for (let i = 0; i < lists.length; i++) {
+            const { id, position } = lists[i];
+            await client.query(
+                'UPDATE lists SET position = $1 WHERE id = $2 AND board_id = $3',
+                [position, id, boardId]
+            );
+        }
+
+        await client.query('COMMIT');
+        res.status(200).json({ message: 'Lists reordered successfully' });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error reordering lists:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    } finally {
+        client.release();
     }
 };
